@@ -1,0 +1,100 @@
+---
+title: "Portfolio 5/SocKultExam"
+author: "Esther and Simon"
+date: "3 maj 2018"
+output: html_document
+---
+
+Load data, quality check, plots
+
+```{r}
+# Working directory
+setwd("C:/Users/simon/Google Drev/SocKult exam/Portfolio5/Data")
+
+library(dplyr)
+library(ggplot2)
+library(rethinking)
+
+# Load data
+temp = list.files(pattern ="*.csv")
+d=data.frame()
+for (i in 1:length(temp)) {
+  csv=read.csv(temp[i])
+  csv$X = csv$X + 1
+  d=rbind(d, csv)
+}
+
+# Rename column
+colnames(d)[colnames(d) == "X"] <- "Trial"
+
+# Recode PR
+d$PR = as.character(d$PR)
+d$PR[d$PR=="no"] = "0"
+d$PR[d$PR=="yes"] = "1"
+d$PR = as.numeric(d$PR)
+
+# Preliminary data check
+ggplot(d, aes(BOT, PR)) + geom_bar(stat= "summary") + geom_errorbar(stat="summary", fun.data=mean_se, width=0.3)
+
+# Check Bot behaviour
+d_yes = d[d$PR == 1,]
+d_yes$BR = as.character(d_yes$BR)
+d_yes$BR[d_yes$BR=="Defect"] = "0"
+d_yes$BR[d_yes$BR=="Cooperate"] = "1"
+d_yes$BR = as.numeric(d_yes$BR)
+
+# A = 27,5 % cooperation
+BOTA=d_yes[d_yes$BOT == "A",]
+sum(BOTA$BR)/length(BOTA$BR)
+
+# B = 66 % cooperation
+BOTB=d_yes[d_yes$BOT == "B",]
+sum(BOTB$BR)/length(BOTB$BR)
+
+# C = 27.6 % cooperation
+BOTC=d_yes[d_yes$BOT == "C",]
+sum(BOTC$BR)/length(BOTC$BR)
+
+# D = 72 % cooperation
+BOTD=d_yes[d_yes$BOT == "D",]
+sum(BOTD$BR)/length(BOTD$BR)
+
+# Player response as a function of time
+ggplot(d, aes(x = Trial, y= PR, colour = BOT))+ geom_smooth()
+
+```
+
+
+Models
+
+```{r}
+
+m1=map2stan(
+  alist(PR ~ dbinom(5280, p),
+        logit(p) <- a[ID] + b_time[ID]*Trial + b_bot[ID]*BOT,
+        a[ID] ~ dnorm(0.5,0.2),
+        b_time[ID] ~ dnorm(0,1),
+        b_bot[ID] ~ dnorm(0,1)
+        ), data = d, iter = 1000, warmup = 200, chains = 1, cores = 1)
+
+precis(m1)
+plot(precis(m1))
+
+m1=map(
+  alist(PR ~ dbinom(120, p),
+        logit(p) <- a + b_time*Trial,
+        a ~ dnorm(0.5,10),
+        b_time ~ dnorm(0,10)
+        ), data = d)
+
+precis(m1)
+plot(precis(m1))
+
+
+library(brms)
+m1 <- brm(PR ~ Trial + BOT  + (1|ID), 
+            data = d, family = binomial())
+
+
+```
+
