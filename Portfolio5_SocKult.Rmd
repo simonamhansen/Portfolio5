@@ -14,6 +14,7 @@ setwd("C:/Users/simon/Google Drev/SocKult exam/Portfolio5/Data")
 library(dplyr)
 library(ggplot2)
 library(rethinking)
+library(brms)
 
 # Load data
 temp = list.files(pattern ="*.csv")
@@ -34,7 +35,7 @@ d$PR[d$PR=="yes"] = "1"
 d$PR = as.numeric(d$PR)
 
 # Preliminary data check
-ggplot(d, aes(BOT, PR)) + geom_bar(stat= "summary") + geom_errorbar(stat="summary", fun.data=mean_se, width=0.3)
+ggplot(d, aes(BOT, PR, fill = BOT)) + geom_bar(stat= "summary") + geom_errorbar(stat="summary", fun.data=mean_se, width=0.3) + theme(legend.position= "none") + ggtitle("Player cooperation for each BOT") + ylab("Player cooperation")
 
 # Check Bot behaviour
 d_yes = d[d$PR == 1,]
@@ -60,41 +61,106 @@ BOTD=d_yes[d_yes$BOT == "D",]
 sum(BOTD$BR)/length(BOTD$BR)
 
 # Player response as a function of time
-ggplot(d, aes(x = Trial, y= PR, colour = BOT))+ geom_smooth()
+ggplot(d, aes(x = Trial, y= PR, colour = BOT)) + geom_smooth(alpha = 0.2) + ggtitle("Player cooperation level as a function of time") + xlab("Time") + ylab("Player cooperation") + xlim(0, 120)
 
 ```
 
 
-Models
+Models (Portfolio 5)
+
+```{r}
+# Convert PR into a factor
+d$PR=as.numeric(d$PR)
+
+# Create 3 models predicting player response
+m1 <- brm(PR ~ Trial*Social_Rep*Prog_Beh  + (1+Trial*Social_Rep*Prog_Beh|ID), 
+            data = d, family = bernoulli(), cores = 2, chains = 4, iter = 1e3)
+
+m2 <- brm(PR ~ Trial+Social_Rep+Prog_Beh  + (1+Trial+Social_Rep+Prog_Beh|ID), 
+            data = d, family = bernoulli(), cores = 2, chains = 4, iter = 1e3)
+
+m3 <- brm(PR ~ Trial*Prog_Beh  + (1+Trial*Prog_Beh|ID), 
+            data = d, family = bernoulli(), cores = 2, chains = 4, iter = 1e3)
+
+# Summary for each model
+summary(m1)
+summary(m2)
+summary(m3)
+
+# To add WAIC onto each model
+m1<-add_ic(m1,ic="waic")
+m2<-add_ic(m2,ic="waic")
+m3<-add_ic(m3,ic="waic")
+
+# Compare models 
+compare_ic(m1,m2,m3, ic="waic")
+
+# Compare estimates from each model
+fixef(m1)
+fixef(m2)
+fixef(m3)
+
+# Convert brms fit into matrix
+fit1 = as.matrix(m1)
+fit2 = as.matrix(m2)
+fit3 = as.matrix(m3)
+
+# Create visual overview of model parameters for each model
+mcmc_intervals(fit1, pars = c("b_Intercept", "b_Trial", "b_Social_RepLow", "b_Prog_BehGood", "b_Trial:Social_RepLow", "b_Trial:Prog_BehGood", "b_Social_RepLow:Prog_BehGood", "b_Trial:Social_RepLow:Prog_BehGood"), 
+           prob = 0.95) +ggplot2::ggtitle("Model 1 parameters")
+
+mcmc_intervals(fit2, pars = c("b_Intercept", "b_Trial", "b_Social_RepLow", "b_Prog_BehGood"), 
+           prob = 0.95) +ggplot2::ggtitle("Model 2 parameters")
+
+mcmc_intervals(fit3, pars = c("b_Intercept", "b_Trial", "b_Prog_BehGood", "b_Trial:Prog_BehGood"), 
+           prob = 0.95) +ggplot2::ggtitle("Model 3 parameters")
+
+# To get posterior probability
+pp_check(m1) 
+
+d$PR=as.factor(d$PR)
+
+# To get model predictions
+predictions=predict(m1, type = "response")
+d$prediction = predictions[,1]
+
+# To make a plot comparing model predictions with actual data. Actual data = red, predictions = blue
+dens(d$PR, col = "red") 
+dens(d$predict, col = "blue", add = TRUE)
+
+# To create a confusion matrix to get accuracy
+d$Predictions[d$prediction>0.5]=1 
+d$Predictions[d$prediction<=0.5]=0
+
+confusionMatrix(data = d$Predictions, reference = d$PR)
+
+```
+
+
+Further analysis for Social and Cultural dynamics exam
 
 ```{r}
 
-m1=map2stan(
-  alist(PR ~ dbinom(5280, p),
-        logit(p) <- a[ID] + b_time[ID]*Trial + b_bot[ID]*BOT,
-        a[ID] ~ dnorm(0.5,0.2),
-        b_time[ID] ~ dnorm(0,1),
-        b_bot[ID] ~ dnorm(0,1)
-        ), data = d, iter = 1000, warmup = 200, chains = 1, cores = 1)
+ranef(m1) #extract random effect. Individual variability.
 
-precis(m1)
-plot(precis(m1))
+m4 <- brm(PR ~ 0 + Social_Rep:Prog_Beh  + (0+Social_Rep:Prog_Beh|ID), 
+            data = d, family = bernoulli(), cores = 2, chains = 4, iter = 1e3)
 
-m1=map(
-  alist(PR ~ dbinom(120, p),
-        logit(p) <- a + b_time*Trial,
-        a ~ dnorm(0.5,10),
-        b_time ~ dnorm(0,10)
-        ), data = d)
+m_RT <- brm(RT ~ 0 + Social_Rep:Prog_Beh  + (0+Social_Rep:Prog_Beh|ID), 
+            data = d, family = exponential(), cores = 2, chains = 4, iter = 1e3)
 
-precis(m1)
-plot(precis(m1))
+summary(m4)
+summary(m_RT)
 
+# To see the effect of trial on reaction time
+ggplot(d, aes(x=Trial, y=RT, colour = BOT)) + geom_smooth()
+ggplot(d, aes(x=Trial, y=RT)) + geom_smooth()
 
-library(brms)
-m1 <- brm(PR ~ Trial + BOT  + (1|ID), 
-            data = d, family = binomial())
+# TO DO:Create smiliair models with time as a variable 
 
+# 1 rating per bot per participant
+# 1 random effect per bot per participant
+
+Rating ~ random effects (1|ID)
 
 ```
-
