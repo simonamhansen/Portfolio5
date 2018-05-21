@@ -15,6 +15,7 @@ library(dplyr)
 library(ggplot2)
 library(rethinking)
 library(brms)
+library(tibble)
 
 # Load data
 temp = list.files(pattern ="*.csv")
@@ -140,8 +141,23 @@ confusionMatrix(data = d$Predictions, reference = d$PR)
 Further analysis for Social and Cultural dynamics exam
 
 ```{r}
+# Extract random effect. Individual variability.
+random=ranef(m1) 
+random=as.data.frame(random)
+random=tibble::rownames_to_column(random)
+colnames(random)[colnames(random) == "rowname"] <- "ID"
 
-ranef(m1) #extract random effect. Individual variability.
+
+# Create plots for most certain effects
+ggplot(random, aes(ID.Estimate.Intercept)) + geom_density()
+ggplot(random, aes(ID.Estimate.Social_RepLow)) + geom_density()
+ggplot(random, aes(ID.Estimate.Prog_BehGood)) + geom_density()
+ggplot(random, aes(ID.Estimate.Social_RepLow.Prog_BehGood)) + geom_density()
+ggplot(random, aes(ID.Estimate.Trial)) + geom_density()
+ggplot(random, aes(ID.Estimate.Trial.Prog_BehGood)) + geom_density()
+
+# A lot of individual variability. Could be due to lack of data, but is also likely to be the results of individual differences. 
+
 
 m4 <- brm(PR ~ 0 + Social_Rep:Prog_Beh  + (0+Social_Rep:Prog_Beh|ID), 
             data = d, family = bernoulli(), cores = 2, chains = 4, iter = 1e3)
@@ -150,7 +166,7 @@ m_RT <- brm(RT ~ 0 + Social_Rep:Prog_Beh  + (0+Social_Rep:Prog_Beh|ID),
             data = d, family = exponential(), cores = 2, chains = 4, iter = 1e3)
 
 summary(m4)
-summary(m_RT)
+summary(m_RT) # No effect of condition on reaction time
 
 # To see the effect of trial on reaction time
 ggplot(d, aes(x=Trial, y=RT, colour = BOT)) + geom_smooth()
@@ -161,6 +177,116 @@ ggplot(d, aes(x=Trial, y=RT)) + geom_smooth()
 # 1 rating per bot per participant
 # 1 random effect per bot per participant
 
-Rating ~ random effects (1|ID)
+# To get rating for each participant
+d_rating=aggregate(d[, 12:15], list(d$ID), mean)
+
+# Change column name
+colnames(d_rating)[colnames(d_rating) == "Group.1"] <- "ID"
+
+# Merge dataset
+d_rating2 = merge(d_rating, random, by = "ID")
+
+# Predicting rating
+m_rating <- brm(cbind(A_rating, B_rating, C_rating, D_rating) ~ ID.Estimate.Intercept + ID.Estimate.Social_RepLow + ID.Estimate.Prog_BehGood, 
+            data = d_rating2, family = gaussian(), cores = 2, chains = 4, iter = 1e3)
+
+summary(m_rating)
+plot(m_rating)
+
+```
+
+Further analysis for Social and Cultural dynamics exam: Are we making decisions in an optimal bayesian manner?
+
+```{r}
+
+# STAN SETTINGS
+
+N_CORES = 2
+ITER = 1e3
+
+STAN_CONTROL = list(
+    adapt_delta = .8,
+    max_treedepth = 10
+)
+
+# make 1 variable with logit of behaviour (.7) score
+# make 1 variable with logit of reliability (divided by 5 before logit) score
+
+d_bayes = d
+d_bayes$l_behavior[d_bayes$Prog_Beh == "Good"] = logit(0.7)
+d_bayes$l_behavior[d_bayes$Prog_Beh == "Bad"] = logit(0.3)  
+d_bayes$l_reliability[d_bayes$BOT == "A"] = logit(3.7/5)
+d_bayes$l_reliability[d_bayes$BOT == "B"] = logit(1.5/5)
+d_bayes$l_reliability[d_bayes$BOT == "C"] = logit(1.7/5)
+d_bayes$l_reliability[d_bayes$BOT == "D"] = logit(3.8/5)
+
+# Creating a non weighted bayesian model
+
+naive_f = bf(PR ~ bias + l_reliability + l_behavior,
+             bias ~ 1 + (1|ID),
+             nl = TRUE)
+
+naive_prior = c(prior(normal(0,1), nlpar = "bias"))
+
+naive_m = brm(naive_f,
+              d_bayes,
+              prior = naive_prior,
+              family = "bernoulli",
+              chains = N_CORES, cores = N_CORES, iter = ITER,
+              control = STAN_CONTROL)
+
+
+# Creating a weighted bayesian model
+
+
+# define weighting function for use by stan
+# here, a uses a log link and w uses a scaled logit link.
+# ie, the raw a and w parameters in the model are unbounded in order for us to put predictors on them
+# then the F function transforms them into (0, Inf) for a and (.5, 1) for w
+
+F_stancode = "
+real F3(real a_raw, real L_raw, real w_raw) {
+real a;
+real L;
+real w;
+a = exp(a_raw);
+L = exp(L_raw * a);
+w = 0.5 + inv_logit(w_raw)/2;
+return log((w * L + 1 - w)./((1 - w) * L + w));
+}
+"
+
+F3 <- function(a_raw, L_raw, w_raw) {
+    # used by brms to back-translate
+    a = exp(a_raw)
+    L = exp(L_raw * a)
+    w = .5 + inv.logit(w_raw) / 2
+    log((w * L + 1 - w)/((1 - w) * L + w))
+    
+}
+
+weighted_f = bf(PR ~ bias + F3(0, l_behavior, wBehavior) + F3(0, l_reliability, wReputation),
+               wBehavior + wReputation + bias ~ 1 + (1|ID),
+               nl = TRUE)
+
+weighted_prior = c(prior(normal(0,1), nlpar = "wReputation"),
+                   prior(normal(0,1), nlpar = "wBehavior"),
+                   prior(normal(0,1), nlpar = "bias"))
+
+weighted_m = brm(weighted_f,
+              d_bayes,
+              stan_funs = F_stancode,
+              prior = weighted_prior,
+              family = "bernoulli",
+              chains = N_CORES, cores = N_CORES, iter = ITER,
+              control = STAN_CONTROL)
+
+expose_functions(weighted_m, vectorize = TRUE)
+
+naive_m<-add_ic(naive_m,ic="waic")
+weighted_m<-add_ic(weighted_m,ic="waic")
+
+# Compare models 
+compare_ic(m1, naive_m , ic="waic")
 
 ```
