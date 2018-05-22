@@ -11,11 +11,8 @@ Load data, quality check, plots
 # Working directory
 setwd("C:/Users/simon/Google Drev/SocKult exam/Portfolio5/Data")
 
-library(dplyr)
-library(ggplot2)
-library(rethinking)
-library(brms)
-library(tibble)
+# Load libraries
+library(dplyr);library(ggplot2);library(rethinking);library(brms);library(tibble);library(boot);library(cowplot)
 
 # Load data
 temp = list.files(pattern ="*.csv")
@@ -34,9 +31,6 @@ d$PR = as.character(d$PR)
 d$PR[d$PR=="no"] = "0"
 d$PR[d$PR=="yes"] = "1"
 d$PR = as.numeric(d$PR)
-
-# Preliminary data check
-ggplot(d, aes(BOT, PR, fill = BOT)) + geom_bar(stat= "summary") + geom_errorbar(stat="summary", fun.data=mean_se, width=0.3) + theme(legend.position= "none") + ggtitle("Player cooperation for each BOT") + ylab("Player cooperation")
 
 # Check Bot behaviour
 d_yes = d[d$PR == 1,]
@@ -61,9 +55,14 @@ sum(BOTC$BR)/length(BOTC$BR)
 BOTD=d_yes[d_yes$BOT == "D",]
 sum(BOTD$BR)/length(BOTD$BR)
 
-# Player response as a function of time
-ggplot(d, aes(x = Trial, y= PR, colour = BOT)) + geom_smooth(alpha = 0.2) + ggtitle("Player cooperation level as a function of time") + xlab("Time") + ylab("Player cooperation") + xlim(0, 120)
+# Duplicate Bot column 
+d$Partner = d$BOT
 
+# Overall cooperation rate for each partner
+ggplot(d, aes(Partner, PR, fill = Partner)) + geom_bar(stat= "summary") + geom_errorbar(stat="summary", fun.data=mean_se, width=0.3) + theme(legend.position= "none") + ggtitle("Player cooperation for each partner") + ylab("Player cooperation")
+
+# Player response as a function of time
+ggplot(d, aes(x = Trial, y= PR, colour = Partner)) + geom_smooth(alpha = 0.2) + ggtitle("Player cooperation level as a function of time") + xlab("Time") + ylab("Player cooperation")
 ```
 
 
@@ -116,10 +115,12 @@ mcmc_intervals(fit2, pars = c("b_Intercept", "b_Trial", "b_Social_RepLow", "b_Pr
 mcmc_intervals(fit3, pars = c("b_Intercept", "b_Trial", "b_Prog_BehGood", "b_Trial:Prog_BehGood"), 
            prob = 0.95) +ggplot2::ggtitle("Model 3 parameters")
 
-# To get posterior probability
+# To get posterior probability and plot marginal effects
 pp_check(m1) 
 
 d$PR=as.factor(d$PR)
+
+plot(marginal_effects(m1)) 
 
 # To get model predictions
 predictions=predict(m1, type = "response")
@@ -146,15 +147,22 @@ random=ranef(m1)
 random=as.data.frame(random)
 random=tibble::rownames_to_column(random)
 colnames(random)[colnames(random) == "rowname"] <- "ID"
-
+colnames(random)[colnames(random) == "ID.Estimate.Intercept"] <- "Intercept_effect"
+colnames(random)[colnames(random) == "ID.Estimate.Social_RepLow"] <- "SocialRep_Low"
+colnames(random)[colnames(random) == "ID.Estimate.Prog_BehGood"] <- "ProgBeh_Good"
+colnames(random)[colnames(random) == "ID.Estimate.Social_RepLow.Prog_BehGood"] <- "SocialRep_Low:ProgBeh_Good"
+colnames(random)[colnames(random) == "ID.Estimate.Trial"] <- "Trial"
+colnames(random)[colnames(random) == "ID.Estimate.Trial.Prog_BehGood"] <- "Trial:ProgBeh_Good"
 
 # Create plots for most certain effects
-ggplot(random, aes(ID.Estimate.Intercept)) + geom_density()
-ggplot(random, aes(ID.Estimate.Social_RepLow)) + geom_density()
-ggplot(random, aes(ID.Estimate.Prog_BehGood)) + geom_density()
-ggplot(random, aes(ID.Estimate.Social_RepLow.Prog_BehGood)) + geom_density()
-ggplot(random, aes(ID.Estimate.Trial)) + geom_density()
-ggplot(random, aes(ID.Estimate.Trial.Prog_BehGood)) + geom_density()
+plot1=ggplot(random, aes(Intercept_effect)) + geom_density()
+plot2=ggplot(random, aes(SocialRep_Low)) + geom_density()
+plot3=ggplot(random, aes(ProgBeh_Good)) + geom_density()
+plot4=ggplot(random, aes(SocialRep_Low:ProgBeh_Good)) + geom_density()
+plot5=ggplot(random, aes(Trial)) + geom_density()
+plot6=ggplot(random, aes(Trial:ProgBeh_Good)) + geom_density()
+
+cowplot::plot_grid(plot1, plot2, plot3, plot4, plot5, plot6)
 
 # A lot of individual variability. Could be due to lack of data, but is also likely to be the results of individual differences. 
 
@@ -187,12 +195,41 @@ colnames(d_rating)[colnames(d_rating) == "Group.1"] <- "ID"
 d_rating2 = merge(d_rating, random, by = "ID")
 
 # Predicting rating
-m_rating <- brm(cbind(A_rating, B_rating, C_rating, D_rating) ~ ID.Estimate.Intercept + ID.Estimate.Social_RepLow + ID.Estimate.Prog_BehGood, 
+m_rating <- brm(cbind(A_rating, B_rating, C_rating, D_rating) ~ Intercept_effect + SocialRep_Low + ProgBeh_Good+SocialRep_Low:ProgBeh_Good, 
             data = d_rating2, family = gaussian(), cores = 2, chains = 4, iter = 1e3)
 
 summary(m_rating)
 plot(m_rating)
 
+pred_rating=predict(m_rating)
+pred_rating=as.data.frame(pred_rating)
+
+d_rating2$PredA_rating = pred_rating$Estimate.Arating
+d_rating2$PredB_rating = pred_rating$Estimate.Brating
+d_rating2$PredC_rating = pred_rating$Estimate.Crating
+d_rating2$PredD_rating = pred_rating$Estimate.Drating
+
+#Calculating rmse
+rmse(d_rating2$A_rating, d_rating2$PredA_rating)
+rmse(d_rating2$B_rating, d_rating2$PredB_rating)
+rmse(d_rating2$C_rating, d_rating2$PredC_rating)
+rmse(d_rating2$D_rating, d_rating2$PredD_rating)
+
+# Plot of rating given by the players
+Aplot=ggplot(d_rating2, aes(A_rating)) + geom_density()
+Bplot=ggplot(d_rating2, aes(B_rating)) + geom_density()
+Cplot=ggplot(d_rating2, aes(C_rating)) + geom_density()
+Dplot=ggplot(d_rating2, aes(D_rating)) + geom_density()
+
+plot_grid(Aplot, Bplot, Cplot, Dplot)
+
+# Plot of predictions given by the model
+PAplot=ggplot(d_rating2, aes(PredA_rating)) + geom_density()
+PBplot=ggplot(d_rating2, aes(PredB_rating)) + geom_density()
+PCplot=ggplot(d_rating2, aes(PredC_rating)) + geom_density()
+PDplot=ggplot(d_rating2, aes(PredD_rating)) + geom_density()
+
+plot_grid(PAplot, PBplot, PCplot, PDplot)
 ```
 
 Further analysis for Social and Cultural dynamics exam: Are we making decisions in an optimal bayesian manner?
@@ -287,6 +324,6 @@ naive_m<-add_ic(naive_m,ic="waic")
 weighted_m<-add_ic(weighted_m,ic="waic")
 
 # Compare models 
-compare_ic(m1, naive_m , ic="waic")
+compare_ic(m1, naive_m, weighted_m, ic="waic")
 
 ```
