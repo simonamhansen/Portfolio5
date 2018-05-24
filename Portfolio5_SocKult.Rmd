@@ -1,6 +1,6 @@
 ---
 title: "Portfolio 5/SocKultExam"
-author: "Esther and Simon"
+author: "Esther Dyngby and Simon Hansen"
 date: "3 maj 2018"
 output: html_document
 ---
