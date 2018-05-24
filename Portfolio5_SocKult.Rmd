@@ -5,7 +5,7 @@ date: "3 maj 2018"
 output: html_document
 ---
 
-Load data, quality check, plots
+Load data, check BOT/Partner behaviour, make preliminary plots
 
 ```{r}
 # Working directory
@@ -66,7 +66,7 @@ ggplot(d, aes(x = Trial, y= PR, colour = Partner)) + geom_smooth(alpha = 0.2) + 
 ```
 
 
-Models (Portfolio 5)
+Primary models (Portfolio 5 and Social and Cultural dynamics)
 
 ```{r}
 # Convert PR into a factor
@@ -133,19 +133,30 @@ dens(d$predict, col = "blue", add = TRUE)
 # To create a confusion matrix to get accuracy
 d$Predictions[d$prediction>0.5]=1 
 d$Predictions[d$prediction<=0.5]=0
-
 confusionMatrix(data = d$Predictions, reference = d$PR)
+
+# Plot predictions
+pred_plot=ggplot(d, aes(y=Predictions, x= Trial, colour = Partner)) + geom_smooth() + ggtitle("Predictions of model 1") + theme(legend.position= "none") + xlab("Time") + ylim(0, 1)
+
+# Plot data
+data_plot=ggplot(d, aes(x = Trial, y= PR, colour = Partner)) + geom_smooth(alpha = 0.2) + ggtitle("Player cooperation level as a function of time") + xlab("Time") + ylab("Player cooperation") + theme(legend.position= "none") + ylim(0, 1)
+
+# Combine the two plots
+plot_grid(pred_plot, data_plot)
 
 ```
 
 
-Further analysis for Social and Cultural dynamics exam
+Further analysis for Social and Cultural dynamics exam: 
+- Predicting indidual ratings from random effects
 
 ```{r}
 # Extract random effect. Individual variability.
 random=ranef(m1) 
 random=as.data.frame(random)
 random=tibble::rownames_to_column(random)
+
+# Change column names
 colnames(random)[colnames(random) == "rowname"] <- "ID"
 colnames(random)[colnames(random) == "ID.Estimate.Intercept"] <- "Intercept_effect"
 colnames(random)[colnames(random) == "ID.Estimate.Social_RepLow"] <- "SocialRep_Low"
@@ -154,7 +165,7 @@ colnames(random)[colnames(random) == "ID.Estimate.Social_RepLow.Prog_BehGood"] <
 colnames(random)[colnames(random) == "ID.Estimate.Trial"] <- "Trial"
 colnames(random)[colnames(random) == "ID.Estimate.Trial.Prog_BehGood"] <- "Trial:ProgBeh_Good"
 
-# Create plots for most certain effects
+# Create plots with individual variability most important effects
 plot1=ggplot(random, aes(Intercept_effect)) + geom_density()
 plot2=ggplot(random, aes(SocialRep_Low)) + geom_density()
 plot3=ggplot(random, aes(ProgBeh_Good)) + geom_density()
@@ -162,28 +173,10 @@ plot4=ggplot(random, aes(SocialRep_Low:ProgBeh_Good)) + geom_density()
 plot5=ggplot(random, aes(Trial)) + geom_density()
 plot6=ggplot(random, aes(Trial:ProgBeh_Good)) + geom_density()
 
+# Combine plots
 cowplot::plot_grid(plot1, plot2, plot3, plot4, plot5, plot6)
 
 # A lot of individual variability. Could be due to lack of data, but is also likely to be the results of individual differences. 
-
-
-m4 <- brm(PR ~ 0 + Social_Rep:Prog_Beh  + (0+Social_Rep:Prog_Beh|ID), 
-            data = d, family = bernoulli(), cores = 2, chains = 4, iter = 1e3)
-
-m_RT <- brm(RT ~ 0 + Social_Rep:Prog_Beh  + (0+Social_Rep:Prog_Beh|ID), 
-            data = d, family = exponential(), cores = 2, chains = 4, iter = 1e3)
-
-summary(m4)
-summary(m_RT) # No effect of condition on reaction time
-
-# To see the effect of trial on reaction time
-ggplot(d, aes(x=Trial, y=RT, colour = BOT)) + geom_smooth()
-ggplot(d, aes(x=Trial, y=RT)) + geom_smooth()
-
-# TO DO:Create smiliair models with time as a variable 
-
-# 1 rating per bot per participant
-# 1 random effect per bot per participant
 
 # To get rating for each participant
 d_rating=aggregate(d[, 12:15], list(d$ID), mean)
@@ -194,16 +187,19 @@ colnames(d_rating)[colnames(d_rating) == "Group.1"] <- "ID"
 # Merge dataset
 d_rating2 = merge(d_rating, random, by = "ID")
 
-# Predicting rating
+# Predicting rating from random effects
 m_rating <- brm(cbind(A_rating, B_rating, C_rating, D_rating) ~ Intercept_effect + SocialRep_Low + ProgBeh_Good+SocialRep_Low:ProgBeh_Good, 
             data = d_rating2, family = gaussian(), cores = 2, chains = 4, iter = 1e3)
 
+# Summary and plot of rating model
 summary(m_rating)
 plot(m_rating)
 
+# Make rating based on model and convert to data frame
 pred_rating=predict(m_rating)
 pred_rating=as.data.frame(pred_rating)
 
+# Save to ratings datafile 
 d_rating2$PredA_rating = pred_rating$Estimate.Arating
 d_rating2$PredB_rating = pred_rating$Estimate.Brating
 d_rating2$PredC_rating = pred_rating$Estimate.Crating
@@ -221,7 +217,7 @@ Bplot=ggplot(d_rating2, aes(B_rating)) + geom_density()
 Cplot=ggplot(d_rating2, aes(C_rating)) + geom_density()
 Dplot=ggplot(d_rating2, aes(D_rating)) + geom_density()
 
-plot_grid(Aplot, Bplot, Cplot, Dplot)
+plot_grid(Aplot, Bplot, Cplot, Dplot) # Combine plots
 
 # Plot of predictions given by the model
 PAplot=ggplot(d_rating2, aes(PredA_rating)) + geom_density()
@@ -229,10 +225,34 @@ PBplot=ggplot(d_rating2, aes(PredB_rating)) + geom_density()
 PCplot=ggplot(d_rating2, aes(PredC_rating)) + geom_density()
 PDplot=ggplot(d_rating2, aes(PredD_rating)) + geom_density()
 
-plot_grid(PAplot, PBplot, PCplot, PDplot)
+plot_grid(PAplot, PBplot, PCplot, PDplot) #Combine plots
 ```
 
-Further analysis for Social and Cultural dynamics exam: Are we making decisions in an optimal bayesian manner?
+
+Further analysis for Social and Cultural dynamics exam: 
+- Modelling reaction time for each partner and reaction time as a function of time
+
+```{r}
+
+# Make model with player cooperation for each partner
+m4 <- brm(PR ~ 0 + Social_Rep:Prog_Beh  + (0+Social_Rep:Prog_Beh|ID), 
+            data = d, family = bernoulli(), cores = 2, chains = 4, iter = 1e3)
+
+# Make model with player reaction time for each partner
+m_RT <- brm(RT ~ 0 + Social_Rep:Prog_Beh  + (0+Social_Rep:Prog_Beh|ID), 
+            data = d, family = exponential(), cores = 2, chains = 4, iter = 1e3)
+
+summary(m4) # Same pattern as what is seen in the main models
+summary(m_RT) # No effect of condition on reaction time
+
+# To see the effect of trial on reaction time
+ggplot(d, aes(x=Trial, y=RT, colour = BOT)) + geom_smooth()
+ggplot(d, aes(x=Trial, y=RT)) + geom_smooth() + ggtitle("Reaction time (RT) as a function of Trial")
+
+```
+
+Further analysis for Social and Cultural dynamics exam: 
+- Are we making decisions in an optimal bayesian manner?
 
 ```{r}
 
@@ -248,7 +268,6 @@ STAN_CONTROL = list(
 
 # make 1 variable with logit of behaviour (.7) score
 # make 1 variable with logit of reliability (divided by 5 before logit) score
-
 d_bayes = d
 d_bayes$l_behavior[d_bayes$Prog_Beh == "Good"] = logit(0.7)
 d_bayes$l_behavior[d_bayes$Prog_Beh == "Bad"] = logit(0.3)  
@@ -258,12 +277,11 @@ d_bayes$l_reliability[d_bayes$BOT == "C"] = logit(1.7/5)
 d_bayes$l_reliability[d_bayes$BOT == "D"] = logit(3.8/5)
 
 # Creating a non weighted bayesian model
-
 naive_f = bf(PR ~ bias + l_reliability + l_behavior,
              bias ~ 1 + (1|ID),
              nl = TRUE)
 
-naive_prior = c(prior(normal(0,1), nlpar = "bias"))
+naive_prior = c(prior(normal(0,1), nlpar = "bias")) # Prior for bias)
 
 naive_m = brm(naive_f,
               d_bayes,
@@ -318,12 +336,11 @@ weighted_m = brm(weighted_f,
               chains = N_CORES, cores = N_CORES, iter = ITER,
               control = STAN_CONTROL)
 
-expose_functions(weighted_m, vectorize = TRUE)
-
+# Adding WAIC for model comparison 
 naive_m<-add_ic(naive_m,ic="waic")
 weighted_m<-add_ic(weighted_m,ic="waic")
 
-# Compare models 
+# Comparing models 
 compare_ic(m1, naive_m, weighted_m, ic="waic")
 
 ```
