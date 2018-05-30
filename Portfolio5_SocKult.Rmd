@@ -120,7 +120,13 @@ pp_check(m1)
 
 d$PR=as.factor(d$PR)
 
-plot(marginal_effects(m1)) 
+marg_plot=plot(marginal_effects(m1)) 
+
+int_plot1=marg_plot$`Social_Rep:Prog_Beh` + labs(x="Social Reputation", colour = "Programmed Behaviour") + scale_color_manual(labels = c("Uncooperative", "Cooperative"), values = c("tomato2", "cadetblue3")) + scale_fill_discrete(guide = "none") + scale_x_discrete(labels = c('Good','Poor'))
+  
+int_plot2=marg_plot$`Trial:Prog_Beh` + labs(colour = "Programmed Behaviour") + scale_color_manual(labels = c("Uncooperative", "Cooperative"), values = c("tomato2", "cadetblue3")) + scale_fill_discrete(guide = "none") + theme(legend.position = "none")
+
+plot_grid(int_plot2, int_plot1, rel_widths = c(1,1.5))
 
 # To get model predictions
 predictions=predict(m1, type = "response")
